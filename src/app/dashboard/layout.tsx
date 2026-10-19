@@ -18,11 +18,10 @@ import {
 import { useAuthStore } from '@/lib/store';
 import { isAdmin } from '@/lib/auth';
 import { isNavItemActive } from '@/lib/nav-active';
-import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/lib/store';
-import { isAdmin } from '@/lib/auth';
+import { useAdminGuard, useAdminRedirect } from '@/lib/useAdminGuard';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
+import { NotificationCenter } from '@/components/NotificationCenter';
 
 declare global {
   interface Window {
@@ -69,6 +68,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // focus-trap so focus moves into the drawer on open, Tab cycles inside it,
   // and focus returns to the hamburger button on close (#356).
   const drawerRef = useFocusTrap<HTMLElement>(mobileNavOpen);
+
+  // Admin authorization guard — returns 'loading' | 'authorized' | 'unauthorized'.
+  // When not on an admin path it always returns 'authorized' immediately, so
+  // non-admin routes are unaffected. Replaces the previously-undefined `adminStatus`.
+  const adminStatus = useAdminGuard();
+  useAdminRedirect(adminStatus);
 
   useEffect(() => {
     if (!token) {
@@ -163,11 +168,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           className="md:hidden text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           aria-label="Close menu"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+      <nav aria-label="Main navigation" className="flex-1 p-4 space-y-1">
         {visibleNavItems.map(({ href, label, icon: Icon, exact }) => {
           // Segment-aware match so a sibling route that merely shares a
           // prefix (e.g. /dashboard/settlements-export) is not highlighted (#358).
@@ -185,7 +190,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
               )}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-4 h-4" aria-hidden="true" />
               {label}
             </Link>
           );
@@ -199,9 +204,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             logout();
             router.push('/auth/login');
           }}
+          aria-label="Sign out"
           className="flex items-center gap-3 px-3 py-2 text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 w-full rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-4 h-4" aria-hidden="true" />
           Sign out
         </button>
       </div>
@@ -211,20 +217,76 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950">
       {/* Mobile top bar */}
-      <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 z-30">
-        <button
-          onClick={() => setMobileNavOpen(true)}
-          className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-          aria-label="Open menu"
-        >
-          <Menu className="w-6 h-6" />
-        </button>
-        <span className="font-bold text-brand-600 text-lg ml-3">DupDub</span>
-      </div>
+      <header
+        role="banner"
+        className="md:hidden fixed top-0 inset-x-0 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 z-30"
+      >
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+            aria-label="Open navigation menu"
+            aria-expanded={mobileNavOpen}
+            aria-controls="mobile-nav-drawer"
+          >
+            <Menu className="w-6 h-6" aria-hidden="true" />
+          </button>
+          <span className="font-bold text-brand-600 text-lg" aria-hidden="true">DupDub</span>
+        </div>
+        <NotificationCenter />
+      </header>
 
       {/* Sidebar - desktop */}
-      <aside className="hidden md:flex w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex-col">
-        {sidebarContent}
+      <aside
+        aria-label="Dashboard sidebar"
+        className="hidden md:flex w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex-col"
+      >
+        {/* Desktop top bar inside sidebar — brand + notifications */}
+        <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
+          <div>
+            <span className="font-bold text-brand-600 text-lg">DupDub</span>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">{merchant.businessName}</p>
+          </div>
+          <NotificationCenter />
+        </div>
+
+        <nav aria-label="Main navigation" className="flex-1 p-4 space-y-1">
+          {visibleNavItems.map(({ href, label, icon: Icon, exact }) => {
+            const active = isNavItemActive(pathname, href, exact);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? 'page' : undefined}
+                onClick={(event) => handleNavClick(event, href)}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
+                )}
+              >
+                <Icon className="w-4 h-4" aria-hidden="true" />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+          <button
+            onClick={() => {
+              if (!confirmNavigation()) return;
+              logout();
+              router.push('/auth/login');
+            }}
+            aria-label="Sign out"
+            className="flex items-center gap-3 px-3 py-2 text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 w-full rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            <LogOut className="w-4 h-4" aria-hidden="true" />
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Sidebar - mobile off-canvas drawer */}
@@ -232,9 +294,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div
             className="fixed inset-0 bg-black/40"
+            aria-hidden="true"
             onClick={() => setMobileNavOpen(false)}
           />
           <aside
+            id="mobile-nav-drawer"
             ref={drawerRef}
             role="dialog"
             aria-modal="true"
@@ -247,8 +311,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
 
-      {/* Main */}
-      <main className="flex-1 overflow-auto pt-14 md:pt-0">{children}</main>
+      {/* Main content area */}
+      <main
+        id="main-content"
+        className="flex-1 overflow-auto pt-14 md:pt-0"
+        aria-label="Main content"
+      >
+        {children}
+      </main>
     </div>
   );
 }
