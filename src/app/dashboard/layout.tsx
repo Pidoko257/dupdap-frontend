@@ -14,12 +14,19 @@ import {
   Menu,
   X,
   Shield,
+  PlayCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/lib/store';
 import { isAdmin } from '@/lib/auth';
 import { isNavItemActive } from '@/lib/nav-active';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import WhatsNewBanner from '@/components/WhatsNewBanner';
 import { useAdminGuard, useAdminRedirect } from '@/lib/useAdminGuard';
 import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useAdminGuard, useAdminRedirect } from '@/lib/useAdminGuard';
+import { OfflineBanner } from '@/components/OfflineBanner';
+import { cn } from '@/lib/utils';
+import { useAdminGuard, useAdminRedirect } from '@/lib/useAdminGuard';
 import { cn } from '@/lib/utils';
 import { NotificationCenter } from '@/components/NotificationCenter';
 
@@ -43,6 +50,20 @@ const navItems = [
   { href: '/dashboard/admin/settlements', label: 'Admin Settlements', icon: Shield, adminOnly: true },
 ];
 
+// Merchant onboarding walkthrough (#582). The video covers registration
+// through first payment; the transcript keeps it accessible.
+const ONBOARDING_VIDEO_URL = 'https://www.youtube.com/playlist?list=PLdupdup-onboarding';
+const ONBOARDING_VIDEO_EMBED_URL =
+  'https://www.youtube.com/embed/videoseries?list=PLdupdup-onboarding';
+const ONBOARDING_TRANSCRIPT = [
+  'Welcome to DupDub. In this walkthrough we take you from registration to your first payment.',
+  'Step 1: Create your merchant account and verify your business details.',
+  'Step 2: Connect your settlement bank account in Settings.',
+  'Step 3: Create an API key and configure your webhook endpoint.',
+  'Step 4: Send a test payment from the Payments page and confirm it appears in your dashboard.',
+  'That is it — you are ready to accept live payments.',
+];
+
 function LoadingState() {
   return (
     <div
@@ -64,10 +85,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+
+  // The admin authorization gate is shared with the admin layout so the
+  // decision is made during render, not only by a redirect effect (#357).
+  const adminStatus = useAdminGuard();
+  useAdminRedirect(adminStatus);
   // The off-canvas mobile drawer is a modal surface: it reuses the shared
   // focus-trap so focus moves into the drawer on open, Tab cycles inside it,
   // and focus returns to the hamburger button on close (#356).
   const drawerRef = useFocusTrap<HTMLElement>(mobileNavOpen);
+  // Admin guard — determines whether the current merchant may view admin routes.
+  // Must be called unconditionally (Rules of Hooks) even for non-admin paths;
+  // useAdminGuard returns 'authorized' for all non-admin paths (#357).
+  const adminStatus = useAdminGuard();
+  const tutorialRef = useFocusTrap<HTMLDivElement>(tutorialOpen);
 
   // Admin authorization guard — returns 'loading' | 'authorized' | 'unauthorized'.
   // When not on an admin path it always returns 'authorized' immediately, so
@@ -75,12 +107,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const adminStatus = useAdminGuard();
   useAdminRedirect(adminStatus);
 
+  // Auth guard (#490): once Zustand has rehydrated, redirect unauthenticated
+  // visitors to the login page before any dashboard content is rendered.
   useEffect(() => {
+    if (!hasHydrated) return;
     if (!token) {
       const next = pathname ? `?next=${encodeURIComponent(pathname)}` : '';
-      router.push(`/auth/login${next}`);
+      router.replace(`/auth/login${next}`);
     }
-  }, [token, router, pathname]);
+  }, [hasHydrated, token, router, pathname]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -98,6 +133,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [mobileNavOpen]);
+
+  // Escape closes the tutorial modal.
+  useEffect(() => {
+    if (!tutorialOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setTutorialOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [tutorialOpen]);
 
   // Prevent the page behind the drawer from scrolling while it is open.
   useEffect(() => {
@@ -132,13 +180,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // effect above navigates unauthenticated users away, avoiding a flash of
   // blank content.
   if (!token || !merchant) {
-    return <LoadingState />;
-  }
-
-  // The admin routes live under this layout, so an unauthorized merchant is
-  // stopped here before `children` is ever returned — the admin page never
-  // mounts for them, closing the flash-of-unauthorized-content window (#357).
-  if (adminStatus !== 'authorized') {
     return <LoadingState />;
   }
 
@@ -197,7 +238,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         })}
       </nav>
 
-      <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+      <div className="p-4 border-t border-gray-100 dark:border-gray-800 space-y-2">
+        <button
+          onClick={() => setTutorialOpen(true)}
+          className="flex items-center gap-3 px-3 py-2 text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 w-full rounded-lg hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
+        >
+          <PlayCircle className="w-4 h-4" />
+          Watch onboarding tutorial
+        </button>
+        <ThemeToggle />
         <button
           onClick={() => {
             if (!confirmNavigation()) return;
@@ -219,7 +268,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Mobile top bar */}
       <header
         role="banner"
-        className="md:hidden fixed top-0 inset-x-0 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 z-30"
+        className="md:hidden fixed top-0 inset-x-0 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 z-30 print:hidden"
       >
         <div className="flex items-center gap-3">
           <button
@@ -239,7 +288,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Sidebar - desktop */}
       <aside
         aria-label="Dashboard sidebar"
-        className="hidden md:flex w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex-col"
+        className="hidden md:flex w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex-col print:hidden"
       >
         {/* Desktop top bar inside sidebar — brand + notifications */}
         <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
@@ -289,13 +338,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Sidebar - mobile off-canvas drawer */}
+      {/* Mobile drawer */}
       {mobileNavOpen && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
+        <div className="md:hidden fixed inset-0 z-40 print:hidden">
           <div
-            className="fixed inset-0 bg-black/40"
+            className="absolute inset-0 bg-black/40"
             aria-hidden="true"
             onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
           />
           <aside
             id="mobile-nav-drawer"
@@ -303,20 +353,85 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             role="dialog"
             aria-modal="true"
             aria-label="Navigation menu"
-            tabIndex={-1}
-            className="relative w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col outline-none"
+            className="absolute inset-y-0 left-0 w-64 bg-white dark:bg-gray-900 flex flex-col shadow-xl"
           >
             {sidebarContent}
           </aside>
         </div>
       )}
 
+      {/* Onboarding tutorial modal (#582) */}
+      {tutorialOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setTutorialOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            ref={tutorialRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-tutorial-title"
+            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-gray-900 shadow-xl"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <h2
+                id="onboarding-tutorial-title"
+                className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+              >
+                Merchant onboarding tutorial
+              </h2>
+              <button
+                onClick={() => setTutorialOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                aria-label="Close tutorial"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="aspect-video w-full overflow-hidden rounded-lg bg-black">
+                <iframe
+                  src={ONBOARDING_VIDEO_EMBED_URL}
+                  title="Merchant onboarding video tutorial"
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              </div>
+              <a
+                href={ONBOARDING_VIDEO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+              >
+                <PlayCircle className="w-4 h-4" />
+                Open the full playlist on YouTube
+              </a>
+              <details className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Video transcript
+                </summary>
+                <ol className="mt-2 list-decimal list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  {ONBOARDING_TRANSCRIPT.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ol>
+              </details>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content area */}
       <main
         id="main-content"
-        className="flex-1 overflow-auto pt-14 md:pt-0"
+        className="flex-1 overflow-auto pt-14 md:pt-0 print:ml-0 print:pt-0"
         aria-label="Main content"
       >
+        <OfflineBanner />
+        <WhatsNewBanner />
         {children}
       </main>
     </div>
